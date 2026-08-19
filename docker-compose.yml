@@ -17,5 +17,24 @@ services:
       timeout: 5s
       retries: 10
 
+  db-test:
+    image: postgres:16-alpine
+    container_name: esnaf-db-test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: esnaf
+      POSTGRES_PASSWORD: esnaf
+      POSTGRES_DB: esnaf_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - esnaf_test_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U esnaf -d esnaf_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   esnaf_pgdata:
+  esnaf_test_pgdata:

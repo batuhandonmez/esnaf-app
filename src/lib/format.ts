@@ -47,3 +47,26 @@ export function formatTodayLine(date: Date): string {
     weekday.charAt(0).toLocaleUpperCase("tr-TR") + weekday.slice(1);
   return `${capitalized}, ${formatDateLong(date)}`;
 }
+
+export function parseTLToKurus(input: string): number | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const match = /^(-?)(\d{1,3}(?:\.\d{3})*|\d+)(?:,(\d{1,2}))?$/.exec(
+    trimmed.replace(/\u00a0/g, ""),
+  );
+  if (!match) return null;
+
+  const sign = match[1] === "-" ? -1 : 1;
+  const whole = Number(match[2].replace(/\./g, ""));
+  const fractionRaw = match[3] ?? "";
+  const fraction = fractionRaw
+    ? Number(fractionRaw) * (fractionRaw.length === 1 ? 10 : 1)
+    : 0;
+
+  if (!Number.isSafeInteger(whole) || !Number.isSafeInteger(fraction)) {
+    return null;
+  }
+
+  return sign * (whole * 100 + fraction);
+}

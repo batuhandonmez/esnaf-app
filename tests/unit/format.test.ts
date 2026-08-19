@@ -4,6 +4,7 @@ import {
   formatNumberTL,
   formatTL,
   formatTodayLine,
+  parseTLToKurus,
 } from "@/lib/format";
 import { describe, expect, it } from "vitest";
 
@@ -40,5 +41,34 @@ describe("tarih formatları", () => {
 
   it("bugün satırı gün adıyla başlar", () => {
     expect(formatTodayLine(date)).toBe("Çarşamba, 19 Ağustos 2026");
+  });
+});
+
+describe("parseTLToKurus", () => {
+  it("TL metnini kuruşa çevirir", () => {
+    expect(parseTLToKurus("1.234,56")).toBe(123456);
+  });
+
+  it("virgülsüz tam sayıyı çevirir", () => {
+    expect(parseTLToKurus("50")).toBe(5000);
+  });
+
+  it("tek haneli kuruşu çevirir", () => {
+    expect(parseTLToKurus("10,5")).toBe(1050);
+  });
+
+  it("negatif değeri çevirir", () => {
+    expect(parseTLToKurus("-250")).toBe(-25000);
+  });
+
+  it("boş girişte null döner", () => {
+    expect(parseTLToKurus("")).toBeNull();
+    expect(parseTLToKurus("   ")).toBeNull();
+  });
+
+  it("geçersiz girişte null döner", () => {
+    expect(parseTLToKurus("abc")).toBeNull();
+    expect(parseTLToKurus("1,234")).toBeNull();
+    expect(parseTLToKurus("12.34")).toBeNull();
   });
 });

@@ -50,6 +50,41 @@ PWA/offline hazırlığı bu katmanlaşmaya dayanır; UI asla doğrudan DB'ye gi
 | Response envelope | Başarı: `{ data }` / `{ data, meta }`; hata: `{ error: { code, message, fields? } }` — `message` daima Türkçe, kullanıcıya gösterilebilir. | Kod tarafı İngilizce anahtar, mesaj Türkçe. |
 | Tahsilat yöntemi | `PaymentMethod` enum (cash/bank_card/credit_card/bank_transfer/other) gelir ve tahsilatta | Küçük maliyet, gerçek bilgi. |
 
+## Onaylanan Kararlar (Q1-Q12)
+
+Kullanıcı onayı: **19 Ağustos 2026.** Tüm açık sorular önerilen yönde karara bağlandı:
+
+| No | Karar |
+| --- | --- |
+| Q1 | Gelir **kayıt anında** sayılır (tahsilat anında değil). |
+| Q2 | İş durumu **3 değer**: `planned / pending / completed`. İptal/taslak yok. |
+| Q3 | Borç/ödenecek takibi **yok** (giderler kayıt anında ödenmiş). |
+| Q4 | MVP'de **hard delete** (soft delete yok). |
+| Q5 | Gider kategorileri **sabit seed**; kullanıcı yönetimi yok. |
+| Q6 | Teklifte **KDV/indirim yok**. |
+| Q7 | Teklifte **expired durumu yok**. |
+| Q8 | **Müşteri silinemez.** |
+| Q9 | CashMovement referans bütünlüğü **servis katmanında** (DB CHECK yok). |
+| Q10 | Teklif kabulünde **otomatik alacak açılmaz**. |
+| Q11 | **Tenant context sınırı korunur**: servisler `(prisma, ctx, input)` imzasıyla yazılır; `ctx` bugün boş. |
+| Q12 | Seed'de **yalnızca "Kasa"** hesabı; banka kullanıcı ekler. |
+
+## CashMovement Kuralları (Onaylı Düzeltme)
+
+Kullanıcı onayıyla BR-19 şöyle netleştirildi:
+
+- **CashMovement için doğrudan edit/delete endpoint'i YOKTUR.** (`POST /api/movements` yalnızca
+  yeni manuel hareket oluşturur; PATCH/DELETE yok.)
+- **Bağımsız immutable hareketler** (`transfer_in`, `transfer_out`, `manual_in`, `manual_out`)
+  herhangi bir kaynağa bağlı değildir ve **hiçbir durumda silinmez.**
+- **Kaynak bağlı otomatik hareketler** (`income`, `expense`, `collection`) yalnızca bağlı oldukları
+  kayıt (Revenue/Expense/Collection) silindiğinde, **aynı transaction içinde** kaldırılır.
+- Bakiye her zaman `openingBalanceKurus + Σ(giriş) − Σ(çıkış)` formülüyle, hareketlerden
+  hesaplanır; hiçbir yerde saklanmaz.
+- Düzeltme ihtiyacı: otomatik hareketlerde bağlı kayıt PATCH ile güncellenince hareket aynı
+  transaction'da senkron edilir; bağımsız hareketlerde düzeltme, ters yönlü yeni bir manuel
+  hareket kaydıyla yapılır (silme yok).
+
 ## Veri Modeli
 
 Ortak alanlar: `id` (cuid), `createdAt @default(now()) @db.Timestamp(3)`,
@@ -403,7 +438,7 @@ Konvansiyonlar:
 | POST | `/api/accounts` | `{ name, type, openingBalanceKurus?, sortOrder? }` |
 | PATCH | `/api/accounts/[id]` | Kısmi güncelle (silme yok) |
 | GET | `/api/accounts/[id]/movements` | Hareket listesi (`from, to`) |
-| POST | `/api/movements` | Manuel para koy/çek: `{ accountId, direction: "in"/"out", amountKurus, date, description? }` |
+| POST | `/api/movements` | Manuel para koy/çek: `{ accountId, direction: "in"/"out", amountKurus, date, description? }` — **PATCH/DELETE yok** |
 | POST | `/api/accounts/transfer` | `{ fromAccountId, toAccountId, amountKurus, date, description? }` → tek transaction, `transferGroupId` ile iki hareket; `from ≠ to` zorunlu |
 | GET | `/api/receivables` | Liste (`customerId, overdue` filtreleri) + satırda `paidKurus, remainingKurus, status` (hesaplanır) |
 | POST | `/api/receivables` | Manuel alacak: `{ customerId, description, totalKurus, dueDate? }` |
@@ -459,7 +494,12 @@ Konvansiyonlar:
 - BR-16: Gider silinince bağlı hareket silinir.
 - BR-17: İş silinince bağlı gelir/gider **korunur**, yalnızca bağ kopar.
 - BR-18: Müşteri ve hesap silinemez. Kategoriler sabittir.
-- BR-19: `CashMovement` immutable; silme yok, düzeltme ters kayıtla yapılır. Bağlı gelir/gider/tahsilat silinince hareketi de silinir (ekstre tutarlılığı servisçe garanti edilir).
+- BR-19: `CashMovement` immutable: **doğrudan edit/delete endpoint'i yoktur.** Bağımsız
+  hareketler (`transfer_in/out`, `manual_in/out`) kaynaksızdır ve silinmez; düzeltme ters
+  yönlü yeni manuel hareketle yapılır. Kaynak bağlı hareketler (`income/expense/collection`)
+  yalnızca bağlı kayıt (gelir/gider/tahsilat) silindiğinde aynı transaction'da kaldırılır;
+  kayıt güncellenince aynı transaction'da senkron edilir. Bakiye daima
+  `openingBalance + hareketler` toplamından hesaplanır.
 
 ## Kabul Kriterleri
 
@@ -490,6 +530,13 @@ Konvansiyonlar:
 - [ ] 0 veya negatif tutarlı gelir/gider/hareket 422 red.
 - [ ] Manuel para koy/çek bakiyeyi doğru günceller; transfer iki hareket üretir, `from=to` reddedilir.
 - [ ] Gelir/gider silinince bağlı hareket silinir, bakiye eski değere döner.
+
+**CashMovement (onaylı düzeltme)**
+
+- [ ] `CashMovement` için PATCH/DELETE endpoint'i YOKTUR; yalnızca `POST /api/movements` (manuel) ve listeleme vardır.
+- [ ] Manuel (`manual_in/out`) ve transfer (`transfer_in/out`) hareketleri hiçbir silme akışında kaldırılmaz.
+- [ ] Gelir/gider/tahsilat silinince bağlı hareket aynı transaction'da kaldırılır; bağımsız hareketler kalır.
+- [ ] Bakiye her zaman `openingBalance + girişler − çıkışlar` toplamıdır; herhangi bir harekette saklı bakiye alanı yoktur.
 
 **Alacak ve tahsilat**
 
@@ -544,6 +591,9 @@ Konvansiyonlar:
 - PWA/offline (katmanlaşma hazırlığı yeterli).
 
 ## Açık Sorular (Karar Gerektiren)
+
+> **TÜMÜ ÇÖZÜLDÜ** — 19 Ağustos 2026 kullanıcı onayıyla. Kararlar "Onaylanan Kararlar (Q1-Q12)"
+> bölümündedir; tablo yalnızca iz sürmek için bırakılmıştır.
 
 | No | Soru | Öneri |
 | --- | --- | --- |
